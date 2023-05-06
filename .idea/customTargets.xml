@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CLionExternalBuildManager">
+    <target id="88d6b7f9-27e6-4514-b862-1d9ed56bf768" name="mdriver" defaultType="MAKE">
+      <configuration id="4531f667-9506-457c-ab39-585fec0e5b2a" name="mdriver" toolchainName="WSL">
+        <build type="MAKE">
+          <make targetName="all" />
+        </build>
+        <clean type="MAKE">
+          <make targetName="clean" />
+        </clean>
+      </configuration>
+    </target>
+  </component>
+</project>

@@ -1,0 +1,7 @@
+Using default tracefiles in ./traces/
+Measuring performance with a cycle counter.
+Processor clock rate ~= 3494.4 MHz
+
+Testing mm malloc
+Reading tracefile: amptjp.rep
+Checking mm_malloc for correctness, 
