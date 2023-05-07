@@ -45,7 +45,7 @@
 #define LIMITSIZE 0xffffffff
 #define HEAD 0
 #define TAIL 4
-#define FIT_NUMBER 1
+#define FIT_NUMBER 8
 #define MIN_BLOCK_SIZE (2*WORD_SIZE)
 typedef unsigned long long uint64_t, dword_t;
 typedef unsigned int uint32_t, word_t;
@@ -130,6 +130,9 @@ word_t CHANGE_ALLOCATED_FRONT(offset_t bp, word_t alloca_front_new) {
     return alloc_front_before;
 }
 
+// the max apace in available in the linked list now.
+word_t max_available_space_now;
+
 const int print_dbg_info = 0;
 int dbg_op_cnt;
 
@@ -146,6 +149,8 @@ int mm_init(void) {
     SET_FREE_BLOCK(16, 8, TRUE, HEAD, TAIL);
     SET_HEAD(16);
     SET_TAIL(16);
+
+    max_available_space_now = 8;
     // set last virtual block
     SET_HEADER(32, 0, FALSE, TRUE);
 
@@ -174,23 +179,27 @@ void *malloc(size_t size) {
     word_t min_size = 0xffffffff;
     word_t size_now = 0;
     word_t fit_cnt = 0;
-    while (object_block != TAIL && fit_cnt < 16) {
-        word_t header = GET_HEADER(object_block);
-        size_now = GET_SIZE(header);
-        fit_cnt++;
-        if (size_now < size_required) {
-            fit_cnt--;
-        } else { // first k fit
-            if (size_now < min_size) {
-                min_size = size_now;
-                min_block = object_block;
+    if(size_required>max_available_space_now+8){
+        object_block=TAIL;
+    }else{
+        while (object_block != TAIL && fit_cnt < 16) {
+            word_t header = GET_HEADER(object_block);
+            size_now = GET_SIZE(header);
+            fit_cnt++;
+            if (size_now < size_required) {
+                fit_cnt--;
+            } else { // first k fit
+                if (size_now < min_size) {
+                    min_size = size_now;
+                    min_block = object_block;
+                }
             }
+            object_block = GET_NEXT(object_block);
         }
-        object_block = GET_NEXT(object_block);
-    }
-    if (fit_cnt != 0) {
-        object_block = min_block;
-        size_now = min_size;
+        if (fit_cnt != 0) {
+            object_block = min_block;
+            size_now = min_size;
+        }
     }
     if (object_block == TAIL) { // space run out
         object_block = PHY_VIR_TRANSLATE(mem_sbrk(size_required + DWORD_SIZE));
@@ -292,6 +301,8 @@ void free(void *ptr) {
             SET_TAIL(object_block);
         }
         CHANGE_ALLOCATED_FRONT(behind_block, FALSE);
+        if (max_available_space_now < size_free)
+            max_available_space_now = size_free;
     } else if (alloc_sit_front == TRUE && alloc_sit_behind == FALSE) {
         // need to merge with block behind
         word_t new_size = size_free + GET_SIZE(behind_header);
@@ -308,6 +319,8 @@ void free(void *ptr) {
         }
         DZERO(behind_block - DWORD_SIZE);
         SET_FREE_BLOCK(object_block, new_size, TRUE, prev_block, next_block);
+        if (max_available_space_now < new_size)
+            max_available_space_now = new_size;
     } else if (alloc_sit_front == FALSE && alloc_sit_behind == TRUE) {
         // need to merge with block front
         offset_t master_block = BLK_FRONT(object_block);
@@ -317,6 +330,8 @@ void free(void *ptr) {
         DZERO(master_block + GET_SIZE(old_master_header));
         SET_FREE_BLOCK(master_block, new_size, GET_ALLOC_FRONT(old_master_header), prev_block, next_block);
         CHANGE_ALLOCATED_FRONT(behind_block, FALSE);
+        if (max_available_space_now < new_size)
+            max_available_space_now = new_size;
     } else {
         // need to merge three blocks together, need to destroy behind block and reshape master block
         offset_t master_block = BLK_FRONT(object_block);
@@ -337,6 +352,8 @@ void free(void *ptr) {
         DZERO(object_block + GET_SIZE(old_header));
         offset_t master_prev = GET_PREV(master_block), master_next = GET_NEXT(master_block);
         SET_FREE_BLOCK(master_block, new_size, GET_ALLOC_FRONT(old_master_header), master_prev, master_next);
+        if (max_available_space_now < new_size)
+            max_available_space_now = new_size;
     }
 
     if (print_dbg_info)
