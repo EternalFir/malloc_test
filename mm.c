@@ -1,5 +1,5 @@
 /*
- * Malloc version 1, an explicit allocator.
+ * Malloc version 1, an explicit allocator with address virtualization.
  * The whole allocator is aligned by 8 Bytes.
  * For each allocated block, it starts with a 4 Bytes header, which contains messages of the block's size, and the alloc
  situation of the block and the block before. The following is the main data of the block. And after that is the optimal
@@ -7,7 +7,7 @@
  * As for a free block, more than the header, it also has a footer at the end, which contains messages of the block's
  size, and the alloc situation of the block itself. What's more, it also contains a two-way linked list in the middle,
  pointing to the free blocks before it and after it.
- * The allocator will use the first-fit strategy and add the freed block to the tail of the linked list.
+ * The allocator will use the first 8 fit strategy and add the freed block to the head of the linked list.
  * by Eternal-Fir at 4.26
  */
 #include <assert.h>
@@ -106,30 +106,30 @@ typedef signed int offset_t;
 #define REQUIRED_SIZE(size) (MAX(ALIGN(size-WORD_SIZE)+WORD_SIZE,MIN_BLOCK_SIZE))
 
 // using to set massages of busy block
-void SET_BUSY_BLOCK(offset_t bp, word_t size, word_t alloc_before) {
-//    SET(bp, size);
-    SET_HEADER(bp, size, alloc_before, TRUE);
-//    SET_FOOTER(bp, size, TRUE);
-}
+#define SET_BUSY_BLOCK(bp,size,alloc_before) SET_HEADER(bp, size, alloc_before, TRUE)
+//void SET_BUSY_BLOCK(offset_t bp, word_t size, word_t alloc_before) {
+//    SET_HEADER(bp, size, alloc_before, TRUE);
+//}
 
 // using to set massages of free block
-void SET_FREE_BLOCK(offset_t bp, word_t size, word_t alloc_front, offset_t prev, offset_t next) {
-//    SET(bp, size);
-    SET_HEADER(bp, size, alloc_front, FALSE);
-    SET_FOOTER(bp, size, FALSE);
-    SET_PREV(bp, prev);
-    SET_NEXT(bp, next);
-}
+#define SET_FREE_BLOCK(bp,size,alloc_front,prev, next) ( SET_HEADER(bp, size, alloc_front, FALSE),SET_FOOTER(bp, size, FALSE),SET_PREV(bp, prev),SET_NEXT(bp, next))
+//void SET_FREE_BLOCK(offset_t bp, word_t size, word_t alloc_front, offset_t prev, offset_t next) {
+//    SET_HEADER(bp, size, alloc_front, FALSE);
+//    SET_FOOTER(bp, size, FALSE);
+//    SET_PREV(bp, prev);
+//    SET_NEXT(bp, next);
+//}
 
 // using to change the allocated situation of the block in front of it, return sit of front before
-word_t CHANGE_ALLOCATED_FRONT(offset_t bp, word_t alloca_front_new) {
-    word_t header = GET_HEADER(bp);
-    word_t size = GET_SIZE(header);
-    word_t alloc_front_before = GET_ALLOC_FRONT(header);
-    word_t alloc_now = GET_ALLOC_NOW(header);
-    SET_HEADER(bp, size, alloca_front_new, alloc_now);
-    return alloc_front_before;
-}
+#define CHANGE_ALLOCATED_FRONT(bp,alloca_front_new) (SET(bp-WORD_SIZE,HEADER_PACK(GET_SIZE(GET(bp-WORD_SIZE)),alloca_front_new,GET_ALLOC_NOW(GET(bp-WORD_SIZE)))))
+//word_t CHANGE_ALLOCATED_FRONT(offset_t bp, word_t alloca_front_new) {
+//    word_t header = GET_HEADER(bp);
+//    word_t size = GET_SIZE(header);
+//    word_t alloc_front_before = GET_ALLOC_FRONT(header);
+//    word_t alloc_now = GET_ALLOC_NOW(header);
+//    SET_HEADER(bp, size, alloca_front_new, alloc_now);
+//    return alloc_front_before;
+//}
 
 // the max apace in available in the linked list now.
 //word_t max_available_space_now;
@@ -234,9 +234,10 @@ void *malloc(size_t size) {
             SET_BUSY_BLOCK(object_block, size_required, alloc_front);
             // need to modify the situation of next block's pre alloc sit.
             offset_t block_behind = BLK_BEHIND_BUSY(object_block);
-            word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, TRUE);
-            if (record_before != FALSE)
-                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
+            CHANGE_ALLOCATED_FRONT(block_behind, TRUE);
+//            word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, TRUE);
+//            if (record_before != FALSE)
+//                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
         } else { // need to divide
             word_t size_remain = size_now - size_required - DWORD_SIZE;
             offset_t new_block = object_block + size_required + WORD_SIZE;
@@ -254,10 +255,11 @@ void *malloc(size_t size) {
                 SET_TAIL(new_block);
             }
             SET_FREE_BLOCK(new_block, size_remain, TRUE, prev_block, next_block);
-            offset_t block_behind = new_block + size_remain + DWORD_SIZE; // don't need?
-            word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, FALSE);
-            if (record_before != FALSE)
-                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
+//            offset_t block_behind = new_block + size_remain + DWORD_SIZE; // don't need?
+//            CHANGE_ALLOCATED_FRONT(block_behind, FALSE);
+//            word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, FALSE);
+//            if (record_before != FALSE)
+//                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
         }
     }
 
@@ -324,7 +326,7 @@ void free(void *ptr) {
         } else {
             SET_PREV(next_block, object_block);
         }
-        ZERO(behind_block - WORD_SIZE);
+//        ZERO(behind_block - WORD_SIZE);
         SET_FREE_BLOCK(object_block, new_size, TRUE, prev_block, next_block);
 //        if (max_available_space_now < new_size)
 //            max_available_space_now = new_size;
@@ -334,7 +336,7 @@ void free(void *ptr) {
         word_t old_master_header = GET_HEADER(master_block);
         word_t new_size = GET_SIZE(old_master_header) + size_free;
         offset_t prev_block = GET_PREV(master_block), next_block = GET_NEXT(master_block);
-        DZERO(master_block + GET_SIZE(old_master_header));
+//        DZERO(master_block + GET_SIZE(old_master_header));
         SET_FREE_BLOCK(master_block, new_size, GET_ALLOC_FRONT(old_master_header), prev_block, next_block);
         CHANGE_ALLOCATED_FRONT(behind_block, FALSE);
 //        if (max_available_space_now < new_size)
@@ -355,8 +357,8 @@ void free(void *ptr) {
         } else {
             SET_PREV(behind_next, behind_prev);
         }
-        DZERO(master_block + GET_SIZE(old_master_header));
-        ZERO(object_block + GET_SIZE(old_header));
+//        DZERO(master_block + GET_SIZE(old_master_header));
+//        ZERO(object_block + GET_SIZE(old_header));
         offset_t master_prev = GET_PREV(master_block), master_next = GET_NEXT(master_block);
         SET_FREE_BLOCK(master_block, new_size, GET_ALLOC_FRONT(old_master_header), master_prev, master_next);
 //        if (max_available_space_now < new_size)
