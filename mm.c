@@ -45,7 +45,7 @@
 #define LIMITSIZE 0xffffffff
 #define HEAD 0
 #define TAIL 4
-#define FIT_NUMBER 12
+#define FIT_NUMBER 10
 #define MIN_BLOCK_SIZE (3*WORD_SIZE)
 typedef unsigned long long uint64_t, dword_t;
 typedef unsigned int uint32_t, word_t;
