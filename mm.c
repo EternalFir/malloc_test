@@ -130,7 +130,7 @@ word_t CHANGE_ALLOCATED_FRONT(offset_t bp, word_t alloca_front_new) {
     return alloc_front_before;
 }
 
-const int print_dbg_info = 1;
+const int print_dbg_info = 0;
 int dbg_op_cnt;
 
 
