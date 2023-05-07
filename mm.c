@@ -45,7 +45,7 @@
 #define LIMITSIZE 0xffffffff
 #define HEAD 0
 #define TAIL 4
-#define FIT_NUMBER 1
+#define FIT_NUMBER 8
 #define MIN_BLOCK_SIZE (3*WORD_SIZE)
 typedef unsigned long long uint64_t, dword_t;
 typedef unsigned int uint32_t, word_t;
@@ -177,7 +177,7 @@ void *malloc(size_t size) {
     word_t size_required = REQUIRED_SIZE(size);
     if (WHOLE_SIZE + size_required > LIMITSIZE)
         return VIR_PHY_TRANSLATE(0);
-    offset_t object_block = GET_HEAD;
+    offset_t object_block = GET_TAIL;
     offset_t min_block = 0;
     word_t min_size = 0xffffffff;
     word_t size_now = 0;
@@ -185,7 +185,7 @@ void *malloc(size_t size) {
 //    if(max_available_space_now!=LIMITSIZE && size_required>max_available_space_now+4){
 //        object_block=TAIL;
 //    }else{
-    while (object_block != TAIL && fit_cnt < FIT_NUMBER) {
+    while (object_block != HEAD && fit_cnt < FIT_NUMBER) {
         word_t header = GET_HEADER(object_block);
         size_now = GET_SIZE(header) + WORD_SIZE; // can put a WORD size into the footer
         fit_cnt++;
@@ -198,14 +198,14 @@ void *malloc(size_t size) {
                 min_block = object_block;
             }
         }
-        object_block = GET_NEXT(object_block);
+        object_block = GET_PREV(object_block);
     }
     if (fit_cnt != 0) {
         object_block = min_block;
         size_now = min_size;
     }
 //    }
-    if (object_block == TAIL) { // space run out
+    if (object_block == HEAD) { // space run out
         object_block = PHY_VIR_TRANSLATE(mem_sbrk(size_required + WORD_SIZE));
         word_t alloc_front = GET_ALLOC_FRONT(GET(object_block - WORD_SIZE));
         MEMCPY(object_block - WORD_SIZE, object_block - WORD_SIZE + size_required + WORD_SIZE);
