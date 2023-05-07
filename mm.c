@@ -182,7 +182,7 @@ void *malloc(size_t size) {
     if(size_required>max_available_space_now+8){
         object_block=TAIL;
     }else{
-        while (object_block != TAIL && fit_cnt < 16) {
+        while (object_block != TAIL && fit_cnt < FIT_NUMBER) {
             word_t header = GET_HEADER(object_block);
             size_now = GET_SIZE(header);
             fit_cnt++;
