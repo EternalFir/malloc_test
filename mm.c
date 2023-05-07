@@ -228,8 +228,8 @@ void *malloc(size_t size) {
             // need to modify the situation of next block's pre alloc sit.
             offset_t block_behind = BLK_BEHIND(object_block);
             word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, TRUE);
-//            if (record_before != FALSE)
-//                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
+            if (record_before != FALSE)
+                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
         } else { // need to divide
             word_t size_remain = size_now - size_required - DWORD_SIZE;
             offset_t new_block = object_block + size_required + DWORD_SIZE;
@@ -249,8 +249,8 @@ void *malloc(size_t size) {
             SET_FREE_BLOCK(new_block, size_remain, TRUE, prev_block, next_block);
             offset_t block_behind = new_block + size_remain + DWORD_SIZE;
             word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, FALSE);
-//            if (record_before != FALSE)
-//                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
+            if (record_before != FALSE)
+                dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
         }
     }
 
@@ -272,16 +272,16 @@ void free(void *ptr) {
 
 
     offset_t object_block = PHY_VIR_TRANSLATE(ptr);
-//    if (object_block < 16 || object_block > WHOLE_SIZE) {
+    if (object_block < 16 || object_block > WHOLE_SIZE) {
 //        printf("free a block out of range: %d", object_block);
-//        return;
-//    }
+        return;
+    }
     word_t old_header = GET_HEADER(object_block);
     word_t size_free = GET_SIZE(old_header) + 8;
-//    if (GET_ALLOC_NOW(old_header) == FALSE) {
-//        dbg_printf("alloc sit error at %d\n", object_block);
-//        return;
-//    }
+    if (GET_ALLOC_NOW(old_header) == FALSE) {
+        printf("alloc sit error at %d\n", object_block);
+        return;
+    }
     word_t alloc_sit_front = GET_ALLOC_FRONT(GET_HEADER(object_block));
     offset_t behind_block = BLK_BEHIND(object_block);
     word_t behind_header = GET_HEADER(behind_block);
