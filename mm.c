@@ -46,7 +46,7 @@
 #define HEAD 0
 #define TAIL 4
 #define FIT_NUMBER 8
-#define MIN_BLOCK_SIZE (2*WORD_SIZE)
+#define MIN_BLOCK_SIZE (3*WORD_SIZE)
 typedef unsigned long long uint64_t, dword_t;
 typedef unsigned int uint32_t, word_t;
 typedef signed int offset_t;
@@ -85,11 +85,11 @@ typedef signed int offset_t;
 // header and footer message get and set
 #define HEADER_PACK(size, alloc_before, alloc_now) (((size)|(alloc_before<<1))|(alloc_now))
 #define FOOTER_PACK(size, alloc) ((size)|(alloc))
-#define GET_SIZE(value) (value & ~0x7)
+#define GET_SIZE(value) (value & ~0x3)
 #define GET_ALLOC_FRONT(value) ((value & 0x3)>>1)
 #define GET_ALLOC_NOW(value) (value & 0x1)
 #define GET_HEADER(bp) GET((bp)-WORD_SIZE)
-#define GET_FOOTER(bp) GET((bp)+GET_SIZE(GET_HEADER(bp))-ALIGNMENT)
+#define GET_FOOTER(bp) GET((bp)+GET_SIZE(GET_HEADER(bp)))
 #define SET_HEADER(bp, size, alloc_before, alloc_now) (SET(((bp)-WORD_SIZE),HEADER_PACK(size, alloc_before, alloc_now)))
 #define SET_FOOTER(bp, size, alloc) (SET(((bp)+size),FOOTER_PACK(size, alloc)))
 #define GET_PREV(bp) (GET(bp))
@@ -97,18 +97,19 @@ typedef signed int offset_t;
 #define SET_PREV(bp, offset) (SET(bp,offset))
 #define SET_NEXT(bp, offset) (SET(bp+WORD_SIZE,offset))
 
-// (bp) be the start of the main part of the blk, then return the (bp) of prev/next block in physics. TODO：地址到底是怎么解引用的？怎么访问内存？
-#define BLK_BEHIND(bp) ((bp)+GET_SIZE(GET_HEADER(bp))+DWORD_SIZE) // 这里在去除footer的时候也要改
-#define BLK_FRONT(bp) ((bp)-GET_SIZE(GET(bp-DWORD_SIZE))-DWORD_SIZE)
+// (bp) be the start of the main part of the blk, then return the (bp) of prev/next block in physics.
+#define BLK_BEHIND_FREE(bp) ((bp)+GET_SIZE(GET_HEADER(bp))+DWORD_SIZE)
+#define BLK_BEHIND_BUSY(bp) ((bp)+GET_SIZE(GET_HEADER(bp))+WORD_SIZE)
+#define BLK_FRONT_FREE(bp) ((bp)-GET_SIZE(GET(bp-DWORD_SIZE))-DWORD_SIZE) // only if the block front is free
 
 // get the required size of the malloc op in
-#define REQUIRED_SIZE(size) (MAX(ALIGN(size),MIN_BLOCK_SIZE))
+#define REQUIRED_SIZE(size) (MAX(ALIGN(size-WORD_SIZE)+WORD_SIZE,MIN_BLOCK_SIZE))
 
 // using to set massages of busy block
 void SET_BUSY_BLOCK(offset_t bp, word_t size, word_t alloc_before) {
 //    SET(bp, size);
     SET_HEADER(bp, size, alloc_before, TRUE);
-    SET_FOOTER(bp, size, TRUE);
+//    SET_FOOTER(bp, size, TRUE);
 }
 
 // using to set massages of free block
@@ -133,8 +134,8 @@ word_t CHANGE_ALLOCATED_FRONT(offset_t bp, word_t alloca_front_new) {
 // the max apace in available in the linked list now.
 word_t max_available_space_now;
 
-//const int print_dbg_info = 0;
-//int dbg_op_cnt;
+const int print_dbg_info = 0;
+int dbg_op_cnt;
 
 
 /*
@@ -154,7 +155,7 @@ int mm_init(void) {
     // set last virtual block
     SET_HEADER(32, 0, FALSE, TRUE);
 
-//    dbg_op_cnt = 0;
+    dbg_op_cnt = 0;
 //    dbg_printf("init_end\n");
     return 0;
 }
@@ -165,10 +166,10 @@ int mm_init(void) {
  * If there isn't a block satisfies the space requirement, we would use mem_sbrk() to ask for enough space
  */
 void *malloc(size_t size) {
-//    if (print_dbg_info) {
-//        dbg_op_cnt++;
-//        dbg_printf("malloc %d start: size=%d\n", dbg_op_cnt, size);
-//    }
+    if (print_dbg_info) {
+        dbg_op_cnt++;
+        dbg_printf("malloc %d start: size=%d\n", dbg_op_cnt, size);
+    }
 
 
     word_t size_required = REQUIRED_SIZE(size);
@@ -179,16 +180,17 @@ void *malloc(size_t size) {
     word_t min_size = 0xffffffff;
     word_t size_now = 0;
     word_t fit_cnt = 0;
-    if(size_required>max_available_space_now+8){
+    if(size_required>max_available_space_now+4){
         object_block=TAIL;
     }else{
         while (object_block != TAIL && fit_cnt < FIT_NUMBER) {
             word_t header = GET_HEADER(object_block);
-            size_now = GET_SIZE(header);
+            size_now = GET_SIZE(header)+WORD_SIZE; // can put a WORD size into the footer
             fit_cnt++;
             if (size_now < size_required) {
                 fit_cnt--;
             } else { // first k fit
+//                fit_cnt++;
                 if (size_now < min_size) {
                     min_size = size_now;
                     min_block = object_block;
@@ -202,10 +204,10 @@ void *malloc(size_t size) {
         }
     }
     if (object_block == TAIL) { // space run out
-        object_block = PHY_VIR_TRANSLATE(mem_sbrk(size_required + DWORD_SIZE));
-        MEMCPY(object_block - WORD_SIZE, object_block - WORD_SIZE + size_required + DWORD_SIZE);
-        CHANGE_ALLOCATED_FRONT(object_block - WORD_SIZE + size_required + DWORD_SIZE, TRUE);
-        word_t alloc_front = GET_ALLOC_NOW(GET(object_block - DWORD_SIZE));
+        object_block = PHY_VIR_TRANSLATE(mem_sbrk(size_required + WORD_SIZE));
+        word_t alloc_front = GET_ALLOC_FRONT(GET(object_block - WORD_SIZE));
+        MEMCPY(object_block - WORD_SIZE, object_block - WORD_SIZE + size_required + WORD_SIZE);
+        CHANGE_ALLOCATED_FRONT(object_block + size_required + WORD_SIZE, TRUE);
         SET_BUSY_BLOCK(object_block, size_required, alloc_front);
     } else {
         if (size_now - size_required < 16) { // allocated directly
@@ -223,16 +225,16 @@ void *malloc(size_t size) {
             } else {
                 SET_TAIL(prev_block);
             }
-            word_t alloc_front = GET_ALLOC_NOW(GET(object_block - DWORD_SIZE));
+            word_t alloc_front = GET_ALLOC_FRONT(GET_HEADER(object_block));
             SET_BUSY_BLOCK(object_block, size_required, alloc_front);
             // need to modify the situation of next block's pre alloc sit.
-            offset_t block_behind = BLK_BEHIND(object_block);
+            offset_t block_behind = BLK_BEHIND_BUSY(object_block);
             word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, TRUE);
             if (record_before != FALSE)
                 dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
         } else { // need to divide
             word_t size_remain = size_now - size_required - DWORD_SIZE;
-            offset_t new_block = object_block + size_required + DWORD_SIZE;
+            offset_t new_block = object_block + size_required + WORD_SIZE;
             offset_t prev_block = GET_PREV(object_block), next_block = GET_NEXT(object_block);
             word_t object_header_before = GET_HEADER(object_block);
             SET_BUSY_BLOCK(object_block, size_required, GET_ALLOC_FRONT(object_header_before));
@@ -247,15 +249,15 @@ void *malloc(size_t size) {
                 SET_TAIL(new_block);
             }
             SET_FREE_BLOCK(new_block, size_remain, TRUE, prev_block, next_block);
-            offset_t block_behind = new_block + size_remain + DWORD_SIZE;
+            offset_t block_behind = new_block + size_remain + DWORD_SIZE; // don't need?
             word_t record_before = CHANGE_ALLOCATED_FRONT(block_behind, FALSE);
             if (record_before != FALSE)
                 dbg_printf("alloc situation error at %d while alloc %d\n", block_behind, object_block);
         }
     }
 
-//    if (print_dbg_info)
-//        dbg_printf("malloc %d end\n", dbg_op_cnt);
+    if (print_dbg_info)
+        dbg_printf("malloc %d end\n", dbg_op_cnt);
     return VIR_PHY_TRANSLATE(object_block);
 }
 
@@ -265,10 +267,10 @@ void *malloc(size_t size) {
  * By checking the block's header, we decided if the block need to be merged to the block in front of it. TODO: If we need to care about the block behind it ?
  */
 void free(void *ptr) {
-//    if (print_dbg_info) {
-//        dbg_op_cnt++;
-//        dbg_printf("free %d start\n", dbg_op_cnt);
-//    }
+    if (print_dbg_info) {
+        dbg_op_cnt++;
+        dbg_printf("free %d start\n", dbg_op_cnt);
+    }
 
 
     offset_t object_block = PHY_VIR_TRANSLATE(ptr);
@@ -277,19 +279,19 @@ void free(void *ptr) {
         return;
     }
     word_t old_header = GET_HEADER(object_block);
-    word_t size_free = GET_SIZE(old_header) + 8;
+    word_t size_free = GET_SIZE(old_header) + WORD_SIZE;
     if (GET_ALLOC_NOW(old_header) == FALSE) {
         printf("alloc sit error at %d\n", object_block);
         return;
     }
     word_t alloc_sit_front = GET_ALLOC_FRONT(GET_HEADER(object_block));
-    offset_t behind_block = BLK_BEHIND(object_block);
+    offset_t behind_block = BLK_BEHIND_BUSY(object_block);
     word_t behind_header = GET_HEADER(behind_block);
     word_t alloc_sit_behind = GET_ALLOC_NOW(behind_header);
     if (alloc_sit_behind == TRUE && alloc_sit_front == TRUE) {
         // simply add a block to the linked list
         // size now need to -8
-        size_free -= 8;
+        size_free -= DWORD_SIZE;
         offset_t second_head = GET_HEAD;
         if (second_head != TAIL) {
             SET_FREE_BLOCK(object_block, size_free, TRUE, HEAD, second_head);
@@ -317,13 +319,13 @@ void free(void *ptr) {
         } else {
             SET_PREV(next_block, object_block);
         }
-        DZERO(behind_block - DWORD_SIZE);
+        ZERO(behind_block - WORD_SIZE);
         SET_FREE_BLOCK(object_block, new_size, TRUE, prev_block, next_block);
         if (max_available_space_now < new_size)
             max_available_space_now = new_size;
     } else if (alloc_sit_front == FALSE && alloc_sit_behind == TRUE) {
         // need to merge with block front
-        offset_t master_block = BLK_FRONT(object_block);
+        offset_t master_block = BLK_FRONT_FREE(object_block);
         word_t old_master_header = GET_HEADER(master_block);
         word_t new_size = GET_SIZE(old_master_header) + size_free;
         offset_t prev_block = GET_PREV(master_block), next_block = GET_NEXT(master_block);
@@ -334,7 +336,7 @@ void free(void *ptr) {
             max_available_space_now = new_size;
     } else {
         // need to merge three blocks together, need to destroy behind block and reshape master block
-        offset_t master_block = BLK_FRONT(object_block);
+        offset_t master_block = BLK_FRONT_FREE(object_block);
         word_t old_master_header = GET_HEADER(master_block);
         word_t new_size = GET_SIZE(old_master_header) + size_free + GET_SIZE(behind_header) + DWORD_SIZE;
         offset_t behind_prev = GET_PREV(behind_block), behind_next = GET_NEXT(behind_block);
@@ -349,15 +351,15 @@ void free(void *ptr) {
             SET_PREV(behind_next, behind_prev);
         }
         DZERO(master_block + GET_SIZE(old_master_header));
-        DZERO(object_block + GET_SIZE(old_header));
+        ZERO(object_block + GET_SIZE(old_header));
         offset_t master_prev = GET_PREV(master_block), master_next = GET_NEXT(master_block);
         SET_FREE_BLOCK(master_block, new_size, GET_ALLOC_FRONT(old_master_header), master_prev, master_next);
         if (max_available_space_now < new_size)
             max_available_space_now = new_size;
     }
 
-//    if (print_dbg_info)
-//        dbg_printf("free %d end\n", dbg_op_cnt);
+    if (print_dbg_info)
+        dbg_printf("free %d end\n", dbg_op_cnt);
     return;
 }
 
@@ -368,11 +370,11 @@ void free(void *ptr) {
  * Otherwise, malloc a new block as size required, copying its data, and freeing the old block.
  */
 void *realloc(void *oldptr, size_t size) {
-//    if (print_dbg_info) {
-//        dbg_op_cnt++;
-//        dbg_printf("realloc %d start: size=%d\n", dbg_op_cnt, size);
-//        dbg_op_cnt--;
-//    }
+    if (print_dbg_info) {
+        dbg_op_cnt++;
+        dbg_printf("realloc %d start: size=%d\n", dbg_op_cnt, size);
+        dbg_op_cnt--;
+    }
 
 
     if (oldptr == NULL)
@@ -390,12 +392,12 @@ void *realloc(void *oldptr, size_t size) {
         MEMCPY(old_block + i, new_block + i);
     }
 
-//    dbg_op_cnt--;
+    dbg_op_cnt--;
 
     free(oldptr);
 
-//    if (print_dbg_info)
-//        dbg_printf("realloc %d end completely.\n", dbg_op_cnt);
+    if (print_dbg_info)
+        dbg_printf("realloc %d end completely.\n", dbg_op_cnt);
     return new_ptr;
 }
 
@@ -403,20 +405,20 @@ void *realloc(void *oldptr, size_t size) {
  * calloc - Allocate the block and set it to zero.
  */
 void *calloc(size_t nmemb, size_t size) {
-//    if (print_dbg_info) {
-//        dbg_op_cnt++;
-//        dbg_printf("calloc %d start: size=%d\n", dbg_op_cnt, size);
-//    }
+    if (print_dbg_info) {
+        dbg_op_cnt++;
+        dbg_printf("calloc %d start: size=%d\n", dbg_op_cnt, size);
+    }
 
     void *new_ptr = malloc(nmemb * size);
     offset_t new_block = PHY_VIR_TRANSLATE(new_ptr);
     word_t new_size = GET_SIZE(GET_HEADER(new_block));
-    for (word_t i = 0; i < new_block - 8; i += 4) {
+    for (word_t i = 0; i < new_size; i += 4) {
         ZERO(new_block + i);
     }
 
-//    if (print_dbg_info)
-//        dbg_printf("calloc %d end\n", dbg_op_cnt);
+    if (print_dbg_info)
+        dbg_printf("calloc %d end\n", dbg_op_cnt);
     return new_ptr;
 }
 
